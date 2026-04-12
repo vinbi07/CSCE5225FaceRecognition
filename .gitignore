@@ -1,0 +1,9 @@
+# Ignoring all files that are too big 
+*.asv
+*.mat
+*.avi
+*.mkv
+
+# Files to keep
+!databaseFeatures.mat
+!testVideo.mp4
