@@ -1,9 +1,9 @@
 # Ignoring all files that are too big 
 *.asv
-*.mat
 *.avi
+*.mat
 *.mkv
 
 # Files to keep
-!databaseFeatures.mat
+!trainedFaceModel.mat
 !testVideo.mp4
