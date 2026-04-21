@@ -26,10 +26,10 @@ end
 
 % PLACEHOLDER: Change if too many strangers are marked as registered (or vice versa).
 % FIX: Calculate Distance
-distanceThreshold = 35;
+distanceThreshold = 0.25; 
 
-desiredFPS = 5;
-pauseTime = 1 / desiredFPS;
+desiredFPS = 15;
+pauseTime = 1 / (2*desiredFPS); % multiply by 2 to account for processing time
 
 figure;
 
@@ -37,37 +37,32 @@ while ishandle(gcf)
     % Get frame from camera
     frame = snapshot(cam);
 
-    % Get frame from preprocessing
-    processedFrame = preProcess(frame, targetSize);
+    % convert the frame to grayscale, and use this frame to detect the faces
+    % and assign labels
+    if size(frame, 3) == 3
+        grayFrame = rgb2gray(frame);
+    else
+        grayFrame = frame;
+    end
 
-    % Detect faces in the processed frame
-    boundingBox = detectFace(processedFrame);
-
-    % Scale bounding boxes back to original frame size
-    scaleX = size(frame, 2) / targetSize(2);
-    scaleY = size(frame, 1) / targetSize(1);
+    % downsample so that the calculations can be run faster
+    % using full images for detection is too slow
+    detectionScale = 0.4; % change this if its laggy, lower = more accurate
+    smallGray = imresize(grayFrame, detectionScale);
+    boundingBox = detectFace(smallGray);
 
     scaledBox = boundingBox;
-    for i = 1:size(boundingBox, 1)
-        scaledBox(i,1) = boundingBox(i,1) * scaleX;
-        scaledBox(i,2) = boundingBox(i,2) * scaleY;
-        scaledBox(i,3) = boundingBox(i,3) * scaleX;
-        scaledBox(i,4) = boundingBox(i,4) * scaleY;
+    if ~isempty(boundingBox)
+        scaledBox(:, 1:4) = round(boundingBox(:, 1:4) / detectionScale);
     end
 
     % Draw results
     if ~isempty(scaledBox)
         labels = strings(size(scaledBox,1), 1);
 
-        if size(frame, 3) == 3
-            grayFrame = rgb2gray(frame);
-        else
-            grayFrame = frame;
-        end
-
         for i = 1:size(scaledBox, 1)
             box = scaledBox(i, :);
-            lbpVector = extractLBPFromBox(grayFrame, box, targetSize);
+            lbpVector = algoProcess(grayFrame, box, targetSize);
 
             if isempty(lbpVector)
                 labels(i) = "Stranger";
@@ -98,22 +93,3 @@ while ishandle(gcf)
 end
 
 clear cam;
-
-function lbpVector = extractLBPFromBox(grayFrame, box, targetSize)
-x = max(1, floor(box(1)));
-y = max(1, floor(box(2)));
-w = max(1, floor(box(3)));
-h = max(1, floor(box(4)));
-
-x2 = min(size(grayFrame, 2), x + w - 1);
-y2 = min(size(grayFrame, 1), y + h - 1);
-
-if x2 <= x || y2 <= y
-    lbpVector = [];
-    return;
-end
-
-faceCrop = grayFrame(y:y2, x:x2);
-processedFace = preProcess(faceCrop, targetSize);
-lbpVector = extractLBPFeatures(processedFace);
-end

@@ -67,7 +67,9 @@ for i = 1:imageFiles
 
     % Process and extract LBP features
     processedFace = preProcess(faceCrop, targetSize);
-    LBPVector = extractLBPFeatures(processedFace);
+
+    % I changed this call to be consistent with main
+    LBPVector = algoProcess(grayFrame, faceBox, targetSize);
 
     % Append the new vector as a new row
     features = [features; LBPVector];
