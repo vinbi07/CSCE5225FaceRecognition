@@ -26,7 +26,7 @@ end
 
 % PLACEHOLDER: Change if too many strangers are marked as registered (or vice versa).
 % FIX: Calculate Distance
-distanceThreshold = 0.25; 
+distanceThreshold = 0.4; 
 
 desiredFPS = 15;
 pauseTime = 1 / (2*desiredFPS); % multiply by 2 to account for processing time
@@ -47,7 +47,7 @@ while ishandle(gcf)
 
     % downsample so that the calculations can be run faster
     % using full images for detection is too slow
-    detectionScale = 0.4; % change this if its laggy, lower = more accurate
+    detectionScale = 0.2; % change this if its laggy, lower = more accurate
     smallGray = imresize(grayFrame, detectionScale);
     boundingBox = detectFace(smallGray);
 
