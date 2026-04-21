@@ -28,7 +28,8 @@ end
 
 % Arrays to hold features and labels
 features = [];
-trainedLabels = [];
+trainedLabels = categorical.empty(0, 1);
+previewFaces = {};
 skippedNoFace = 0;
 
 % Go through the images
@@ -66,11 +67,14 @@ for i = 1:imageFiles
 
     % Process and extract LBP features
     processedFace = preProcess(faceCrop, targetSize);
-    LBPVector = extractLBPFeatures(processedFace);
+
+    % I changed this call to be consistent with main
+    LBPVector = algoProcess(grayFrame, faceBox, targetSize);
 
     % Append the new vector as a new row
     features = [features; LBPVector];
     trainedLabels = [trainedLabels; imds.Labels(i)];
+    previewFaces{end + 1, 1} = processedFace;
 end
 
 % Check if any features were extracted
@@ -83,6 +87,16 @@ model = struct();
 model.targetSize = targetSize;
 model.features = features;
 model.labels = trainedLabels;
+model.previewFaces = previewFaces;
+model.previewLabels = string(trainedLabels);
+
+labelCats = categorical(trainedLabels);
+faceNames = categories(labelCats);
+faceCounts = countcats(labelCats);
+hasSamples = faceCounts > 0;
+
+model.registeredFaces = string(faceNames(hasSamples));
+model.samplesPerFace = faceCounts(hasSamples);
 
 save(outputMatPath, 'model');
 
@@ -91,5 +105,6 @@ fprintf('Images scanned: %d\n', imageFiles);
 fprintf('Faces learned: %d\n', size(features, 1));
 fprintf('Skipped (no face): %d\n', skippedNoFace);
 fprintf('Model saved to: %s\n', outputMatPath);
+fprintf('Preview: run showModelMontage to see saved face crops.\n');
 end
 
