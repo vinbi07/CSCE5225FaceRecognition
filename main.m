@@ -24,9 +24,15 @@ if isempty(trainedFeatures)
     error('Model is empty. Re-run algoTraining.');
 end
 
+% Dynamic live metrics (no manual label input required).
+liveEval.totalDetections = 0;
+liveEval.registeredDetections = 0;
+liveEval.strangerDetections = 0;
+liveEval.frameCount = 0;
+
 % PLACEHOLDER: Change if too many strangers are marked as registered (or vice versa).
 % FIX: Calculate Distance
-distanceThreshold = 0.4; 
+distanceThreshold = 0.4;
 
 desiredFPS = 15;
 pauseTime = 1 / (2*desiredFPS); % multiply by 2 to account for processing time
@@ -45,8 +51,11 @@ while ishandle(gcf)
         grayFrame = frame;
     end
 
+    % Apply adaptive histogram equalization for possible lighting issues
+    normGray = adapthisteq(grayFrame, 'ClipLimit', 0.01, 'NumTiles', [8 8]);
+
+
     % downsample so that the calculations can be run faster
-    % using full images for detection is too slow
     detectionScale = 0.2; % change this if its laggy, lower = more accurate
     smallGray = imresize(grayFrame, detectionScale);
     boundingBox = detectFace(smallGray);
@@ -56,9 +65,12 @@ while ishandle(gcf)
         scaledBox(:, 1:4) = round(boundingBox(:, 1:4) / detectionScale);
     end
 
+    frameSummary = 'This Frame | Faces: 0 | Registered: 0 | Stranger: 0';
+
     % Draw results
     if ~isempty(scaledBox)
         labels = strings(size(scaledBox,1), 1);
+        isRegistered = false(size(scaledBox,1), 1);
 
         for i = 1:size(scaledBox, 1)
             box = scaledBox(i, :);
@@ -70,20 +82,47 @@ while ishandle(gcf)
             end
 
             [bestDistance, bestIdx] = min(pdist2(double(lbpVector), trainedFeatures, 'euclidean'));
+            confidence = max(0, 1 - (bestDistance / distanceThreshold));
 
             if bestDistance <= distanceThreshold
-                labels(i) = "Registered: " + trainedLabels(bestIdx);
+                isRegistered(i) = true;
+                labels(i) = "Registered: " + trainedLabels(bestIdx) + " | confidence: " + sprintf('%.0f%%', confidence * 100);
             else
                 labels(i) = "Stranger";
             end
         end
 
+        % Update cumulative live metrics from all detections in this frame.
+        detectionsThisFrame = size(scaledBox, 1);
+        registeredThisFrame = nnz(isRegistered);
+        strangerThisFrame = detectionsThisFrame - registeredThisFrame;
+
+        liveEval.totalDetections = liveEval.totalDetections + detectionsThisFrame;
+        liveEval.registeredDetections = liveEval.registeredDetections + registeredThisFrame;
+        liveEval.strangerDetections = liveEval.strangerDetections + strangerThisFrame;
+
         outFrame = insertShape(frame, 'Rectangle', scaledBox, ...
             'Color', 'green', 'LineWidth', 3);
         outFrame = insertText(outFrame, scaledBox(:,1:2), labels, ...
             'BoxColor', 'yellow', 'FontSize', 18);
+
+        frameSummary = sprintf('This Frame | Faces: %d | Registered: %d | Stranger: %d', ...
+            detectionsThisFrame, registeredThisFrame, strangerThisFrame);
     else
         outFrame = frame;
+    end
+
+    outFrame = insertText(outFrame, [10 10], frameSummary, ...
+        'BoxColor', 'black', 'TextColor', 'white', 'FontSize', 16);
+
+    liveEval.frameCount = liveEval.frameCount + 1;
+
+    if liveEval.totalDetections > 0
+        runningAccuracy = 100 * (liveEval.registeredDetections / liveEval.totalDetections);
+        statusText = sprintf('Cumulative | Frames: %d | Detections: %d | Registered Rate: %.2f%%', ...
+            liveEval.frameCount, liveEval.totalDetections, runningAccuracy);
+        outFrame = insertText(outFrame, [10 40], statusText, ...
+            'BoxColor', 'black', 'TextColor', 'white', 'FontSize', 16);
     end
 
     imshow(outFrame);
