@@ -1,12 +1,13 @@
 function showModelMontage(modelPath, maxImages)
-%   showModelMontage('trainedFaceModel.mat', 20)
+%   showModelMontage('trainedFaceModel.mat')
+%   showModelMontage('trainedFaceModel.mat', 40)
 
 if nargin < 1 || isempty(modelPath)
     modelPath = fullfile(fileparts(mfilename('fullpath')), 'trainedFaceModel.mat');
 end
 
 if nargin < 2 || isempty(maxImages)
-    maxImages = 25;
+    maxImages = inf;
 end
 
 if ~isfile(modelPath)
@@ -29,18 +30,89 @@ else
     previewLabels = repmat("Face", numel(previewFaces), 1);
 end
 
-n = min(numel(previewFaces), maxImages);
-numCols = 5;
-numRows = ceil(n / numCols);
-
-figure('Name', 'Registered Face Previews');
-tiledlayout(numRows, numCols, 'TileSpacing', 'compact', 'Padding', 'compact');
-
-for i = 1:n
-    nexttile;
-    imshow(previewFaces{i});
-    title(previewLabels(i), 'Interpreter', 'none', 'FontSize', 10);
+if numel(previewLabels) < numel(previewFaces)
+    previewLabels(end + 1:numel(previewFaces), 1) = "Face";
+elseif numel(previewLabels) > numel(previewFaces)
+    previewLabels = previewLabels(1:numel(previewFaces));
 end
 
-sgtitle(sprintf('Face previews from model (%d shown)', n));
+personNames = previewLabels;
+hasAugmentationSuffix = contains(previewLabels, " | ");
+personNames(hasAugmentationSuffix) = extractBefore(previewLabels(hasAugmentationSuffix), " | ");
+uniquePeople = unique(personNames, 'stable');
+
+if isempty(uniquePeople)
+    error('No person labels available in model. Re-run algoTraining.');
+end
+
+fig = figure( ...
+    'Name', 'Registered Face Previews', ...
+    'NumberTitle', 'off');
+setappdata(fig, 'currentPersonIndex', 1);
+
+uicontrol( ...
+    'Style', 'pushbutton', ...
+    'String', 'Previous', ...
+    'Position', [10 10 90 30], ...
+    'Callback', @showPreviousPerson);
+
+uicontrol( ...
+    'Style', 'pushbutton', ...
+    'String', 'Next', ...
+    'Position', [110 10 90 30], ...
+    'Callback', @showNextPerson);
+
+renderCurrentPerson();
+
+    function renderCurrentPerson()
+        currentPersonIndex = getappdata(fig, 'currentPersonIndex');
+        currentPerson = uniquePeople(currentPersonIndex);
+        currentMask = personNames == currentPerson;
+
+        personFaces = previewFaces(currentMask);
+        personLabels = previewLabels(currentMask);
+
+        n = min(numel(personFaces), maxImages);
+        numCols = min(4, max(1, ceil(sqrt(n))));
+        numRows = ceil(n / numCols);
+
+        clf(fig);
+
+        uicontrol( ...
+            'Style', 'pushbutton', ...
+            'String', 'Previous', ...
+            'Position', [10 10 90 30], ...
+            'Callback', @showPreviousPerson);
+
+        uicontrol( ...
+            'Style', 'pushbutton', ...
+            'String', 'Next', ...
+            'Position', [110 10 90 30], ...
+            'Callback', @showNextPerson);
+
+        tiledlayout(fig, numRows, numCols, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+        for idx = 1:n
+            nexttile;
+            imshow(personFaces{idx});
+            title(personLabels(idx), 'Interpreter', 'none', 'FontSize', 10);
+        end
+
+        sgtitle(sprintf('%s (%d of %d images shown) | Person %d of %d', ...
+            currentPerson, n, numel(personFaces), currentPersonIndex, numel(uniquePeople)));
+    end
+
+    function showPreviousPerson(~, ~)
+        currentPersonIndex = getappdata(fig, 'currentPersonIndex');
+        currentPersonIndex = max(1, currentPersonIndex - 1);
+        setappdata(fig, 'currentPersonIndex', currentPersonIndex);
+        renderCurrentPerson();
+    end
+
+    function showNextPerson(~, ~)
+        currentPersonIndex = getappdata(fig, 'currentPersonIndex');
+        currentPersonIndex = min(numel(uniquePeople), currentPersonIndex + 1);
+        setappdata(fig, 'currentPersonIndex', currentPersonIndex);
+        renderCurrentPerson();
+    end
 end
