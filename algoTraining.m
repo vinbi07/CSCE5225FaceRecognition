@@ -71,10 +71,43 @@ for i = 1:imageFiles
     % I changed this call to be consistent with main
     LBPVector = algoProcess(grayFrame, faceBox, targetSize);
 
-    % Append the new vector as a new row
+    % Append the original vector as a new row
     features = [features; LBPVector];
     trainedLabels = [trainedLabels; imds.Labels(i)];
     previewFaces{end + 1, 1} = processedFace;
+
+    % Perform some data augmentation
+    % we will flip the face horizontally, rotate it, and adjust brightness for each one
+    % each photo will have 5 variations stored in memory
+
+    % this augmentation is meant to help the model learn to recognize faces 
+    % in different conditions/orientations/lighting
+    augs = { ...
+        fliplr(faceCrop), ...                              % flip about the y-axis
+        imrotate(faceCrop, -10, 'bilinear', 'crop'), ...  % 10 degrees rotation left and right
+        imrotate(faceCrop,  10, 'bilinear', 'crop'), ... 
+        imadjust(faceCrop, [], [], 0.8), ...               % slightly brighter (gamma < 1)
+        imadjust(faceCrop, [], [], 1.2), ...               % slightly darker (gamma > 1)
+    };
+
+    % loop through that array of augmentations and extract the features for each
+    % we won't store as images, but add the LBP for each into the mat file
+    for a = 1:numel(augs)
+
+        % take current 
+        augCrop = augs{a};
+        if isempty(augCrop), continue; end
+        
+        % preprocess it
+        augProcessed = preProcess(augCrop, targetSize);
+
+        % extract features
+        augLBP = extractLBPFeatures(augProcessed);
+
+        % update features and labels
+        features = [features; augLBP];
+        trainedLabels = [trainedLabels; imds.Labels(i)];
+    end
 end
 
 % Check if any features were extracted
