@@ -302,7 +302,18 @@ end
 
 if ~isfield(recognition, 'distanceThreshold') || isempty(recognition.distanceThreshold) ...
         || ~isfinite(recognition.distanceThreshold) || recognition.distanceThreshold <= 0
-    recognition.distanceThreshold = 0.85;
+    recognition.distanceThreshold = 0.75;
+end
+
+if ~isfield(recognition, 'confidenceMinDistance') || isempty(recognition.confidenceMinDistance) ...
+        || ~isfinite(recognition.confidenceMinDistance) || recognition.confidenceMinDistance < 0
+    recognition.confidenceMinDistance = 0;
+end
+
+if ~isfield(recognition, 'confidenceMaxDistance') || isempty(recognition.confidenceMaxDistance) ...
+        || ~isfinite(recognition.confidenceMaxDistance) ...
+        || recognition.confidenceMaxDistance <= recognition.confidenceMinDistance
+    recognition.confidenceMaxDistance = max(recognition.distanceThreshold, recognition.confidenceMinDistance + 0.05);
 end
 end
 
@@ -311,13 +322,27 @@ sampleDistances = pdist2(lbpVector, trainedFeatures, 'euclidean');
 [bestDistance, bestIdx] = min(sampleDistances);
 bestLabel = trainedLabels(bestIdx);
 isRegistered = bestDistance <= recognition.distanceThreshold;
-confidence = max(0, 1 - (bestDistance / recognition.distanceThreshold));
+confidence = computeRangeBasedConfidence(bestDistance, recognition);
 
 matchResult = struct();
 matchResult.label = bestLabel;
 matchResult.distance = bestDistance;
 matchResult.isRegistered = isRegistered;
 matchResult.confidence = confidence;
+end
+
+function confidence = computeRangeBasedConfidence(bestDistance, recognition)
+lowerBound = recognition.confidenceMinDistance;
+upperBound = recognition.confidenceMaxDistance;
+rangeWidth = max(upperBound - lowerBound, eps);
+
+if bestDistance <= lowerBound
+    confidence = 1;
+elseif bestDistance >= upperBound
+    confidence = 0;
+else
+    confidence = 1 - ((bestDistance - lowerBound) / rangeWidth);
+end
 end
 
 function handleStopButton(~, ~)
