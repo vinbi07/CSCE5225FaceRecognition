@@ -7,7 +7,7 @@ if nargin < 1 || isempty(inFrame)
     error('preProcess requires one input frame.');
 end
 
-if nargin < 2
+if nargin < 2 || isempty(targetSize)
     targetSize = [200 200];
 end
 
@@ -34,8 +34,14 @@ eqFrame = adapthisteq(gammaNormalized, 'ClipLimit', 0.02, 'NumTiles', [8 8]);
 %filteredFrame = imgaussfilt(resizedFrame, 1.0);
 
 filteredDouble = double(eqFrame);
-minVal = double(min(filteredDouble(:)));
-maxVal = double(max(filteredDouble(:)));
-normalizedFrame = (filteredDouble - minVal) / (maxVal - minVal) * 255;
+minVal = min(filteredDouble(:));
+maxVal = max(filteredDouble(:));
+
+if maxVal > minVal
+    normalizedFrame = (filteredDouble - minVal) / (maxVal - minVal) * 255;
+else
+    normalizedFrame = zeros(size(filteredDouble));
+end
+
 outFrame = uint8(normalizedFrame);
 end
