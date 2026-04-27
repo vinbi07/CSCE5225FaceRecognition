@@ -174,9 +174,29 @@ else
     distanceThreshold = prctile(nearestSame, 90);
 end
 
+confidenceMinDistance = minOrFallback(nearestSame, 0);
+confidenceMaxDistance = maxOrFallback(nearestSame, distanceThreshold);
+
 recognition = struct();
 recognition.distanceThreshold = max(distanceThreshold, 0.05);
 recognition.marginRatioThreshold = 0.92;
+recognition.confidenceMinDistance = max(confidenceMinDistance, 0);
+recognition.confidenceMaxDistance = max(confidenceMaxDistance, recognition.confidenceMinDistance + 0.05);
 end
 
+function value = minOrFallback(values, fallbackValue)
+if isempty(values)
+    value = fallbackValue;
+else
+    value = min(values);
+end
+end
+
+function value = maxOrFallback(values, fallbackValue)
+if isempty(values)
+    value = fallbackValue;
+else
+    value = max(values);
+end
+end
 
