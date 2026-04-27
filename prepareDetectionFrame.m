@@ -14,7 +14,11 @@ else
 end
 debugSteps.grayFrame = grayFrame;
 
-equalizedFrame = adapthisteq(grayFrame, 'ClipLimit', 0.02, 'NumTiles', [8 8]);
+gDouble = double(grayFrame) / 255;
+gammaNormalized = uint8(gDouble .^ 0.8 * 255);
+debugSteps.gammaNormalized = gammaNormalized;
+
+equalizedFrame = adapthisteq(gammaNormalized, 'ClipLimit', 0.02, 'NumTiles', [8 8]);
 debugSteps.equalizedFrame = equalizedFrame;
 
 denoisedFrame = medfilt2(equalizedFrame, [3 3]);
