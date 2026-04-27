@@ -1,4 +1,4 @@
-% Addison Nally
+% Addison Nally, Joey Suliguin, Joshua Shapiro
 % main.m
 % Live camera face detection
 
@@ -41,6 +41,14 @@ liveEval.frameCount = 0;
 
 desiredFPS = 10;
 pauseTime = 1 / (2*desiredFPS); % multiply by 2 to account for processing time
+
+% Temporal smoothing: rolling queue of raw labels per face slot
+
+% amount of frames to consider for smoothing
+smoothingWindowSize = 10;
+
+% maintain a larger queue for each current face slot
+labelQueues = {};
 
 % Stranger logging setup
 logFolder = fullfile(fileparts(mfilename('fullpath')), 'strangerVideoLogs');
@@ -105,6 +113,20 @@ while ishandle(fig) && ~getappdata(fig, 'stopRequested')
     strangerThisFrame = 0;
     bestStrangerDistanceThisFrame = inf;
 
+    % Whenever the number of detected faces changes, reset the label queues
+    % get # of faces
+    newFaceCount = size(scaledBox, 1);
+
+    % allocate label queues
+    if newFaceCount ~= numel(labelQueues)
+        labelQueues = cell(1, newFaceCount);
+
+        % reset each of the queues
+        for k = 1:newFaceCount
+            labelQueues{k} = {};
+        end
+    end
+
     % Draw results
     if ~isempty(scaledBox)
         labels = strings(size(scaledBox,1), 1);
@@ -114,28 +136,53 @@ while ishandle(fig) && ~getappdata(fig, 'stopRequested')
             box = scaledBox(i, :);
             lbpVector = algoProcess(detectionFrame, box, targetSize);
 
+            % match the LBP vector
             if isempty(lbpVector)
-                labels(i) = "Stranger";
-                continue;
+                rawLabel = "Stranger";
+                currentConfidence = 0;
+                currentDistance = inf;
+            else
+                matchResult = matchRegisteredFace(double(lbpVector), trainedFeatures, trainedLabels, recognition);
+                fprintf('Best label: %s | Distance: %.4f | Confidence: %.0f%% | Result: %s\n', ...
+                    matchResult.label, ...
+                    matchResult.distance, ...
+                    matchResult.confidence * 100, ...
+                    string(ternary(matchResult.isRegistered, "Registered", "Stranger")));
+
+                rawLabel = ternary(matchResult.isRegistered, matchResult.label, "Stranger");
+                currentConfidence = matchResult.confidence;
+                currentDistance = matchResult.distance;
             end
 
-            matchResult = matchRegisteredFace(double(lbpVector), trainedFeatures, trainedLabels, recognition);
-            fprintf('Best label: %s | Distance: %.4f | Confidence: %.0f%% | Result: %s\n', ...
-                matchResult.label, ...
-                matchResult.distance, ...
-                matchResult.confidence * 100, ...
-                string(ternary(matchResult.isRegistered, "Registered", "Stranger")));
+            % push each of the raw labels into the queue for this slot
+            labelQueues{i}{end+1} = rawLabel;
+            if numel(labelQueues{i}) > smoothingWindowSize
+                labelQueues{i}(1) = [];
+            end
 
-            if matchResult.isRegistered
+            % take the mode of the queue as the smoothed label
+            allQueueLabels = string(labelQueues{i});
+
+            % find the # ids for each label
+            [uniqueQueueLabels, ~, qIdx] = unique(allQueueLabels);
+
+            % count each label
+            labelCounts = accumarray(qIdx(:), 1);
+            [~, modeIdx] = max(labelCounts);
+            % the mode will be the max of the label counts
+            smoothedLabel = uniqueQueueLabels(modeIdx);
+
+            % if not stranger, the new label is the mode
+            if smoothedLabel ~= "Stranger"
                 isRegistered(i) = true;
-                labels(i) = "Registered: " + matchResult.label + " | confidence: " + ...
-                    sprintf('%.0f%%', matchResult.confidence * 100);
+                labels(i) = "Registered: " + smoothedLabel + " | confidence: " + ...
+                    sprintf('%.0f%%', currentConfidence * 100);
             else
                 labels(i) = "Stranger";
                 strangerThisFrame = strangerThisFrame + 1;
 
-                if matchResult.distance < bestStrangerDistanceThisFrame
-                    bestStrangerDistanceThisFrame = matchResult.distance;
+                if currentDistance < bestStrangerDistanceThisFrame
+                    bestStrangerDistanceThisFrame = currentDistance;
                 end
             end
         end

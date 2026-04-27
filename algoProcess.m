@@ -1,3 +1,5 @@
+% Joshua Shapiro: Process a detected face region and extract LBP features
+
 function lbpVector = algoProcess(grayFrame, box, targetSize)
 x = max(1, floor(box(1)));
 y = max(1, floor(box(2)));
