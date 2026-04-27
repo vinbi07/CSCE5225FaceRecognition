@@ -32,12 +32,41 @@ liveEval.frameCount = 0;
 
 % PLACEHOLDER: Change if too many strangers are marked as registered (or vice versa).
 % FIX: Calculate Distance
-distanceThreshold = 0.4;
+distanceThreshold = 0.15; % Adjust based on validation results (lower = stricter match, higher = more lenient)
 
 desiredFPS = 15;
 pauseTime = 1 / (2*desiredFPS); % multiply by 2 to account for processing time
 
+% Stranger logging setup
+logFolder = fullfile(fileparts(mfilename('fullpath')), 'strangerVideoLogs');
+if ~exist(logFolder, 'dir')
+    mkdir(logFolder);
+end
+
+logFile = fullfile(logFolder, 'strangerLog.csv');
+if ~isfile(logFile)
+    fid = fopen(logFile, 'w');
+    fprintf(fid, 'Timestamp,VideoFile,TriggerStrangerCount,MaxStrangerCount,BestDistance\n');
+    fclose(fid);
+end
+
+triggerStrangerCount = 0;
+maxStrangerCount = 0;
+eventBestDistance = inf;
+currentVideoName = "";
+bestStrangerDistanceThisFrame = inf;
+recordDurationSec = 5;
+cooldownSec = 0;
+isRecording = false;
+recordStartTime = [];
+lastRecordingEndTime = [];
+videoWriter = [];
+strangerFrameCount = 0;
+strangerFramesNeeded = 3; % number of consecutive frames with strangers before logging (to avoid false positives)
+
 figure;
+
+
 
 while ishandle(gcf)
     % Get frame from camera
@@ -56,7 +85,7 @@ while ishandle(gcf)
 
 
     % downsample so that the calculations can be run faster
-    detectionScale = 0.2; % change this if its laggy, lower = more accurate
+    detectionScale = 0.18; % change this if its laggy, lower = more accurate
     smallGray = imresize(grayFrame, detectionScale);
     boundingBox = detectFace(smallGray);
 
@@ -66,6 +95,8 @@ while ishandle(gcf)
     end
 
     frameSummary = 'This Frame | Faces: 0 | Registered: 0 | Stranger: 0';
+    strangerThisFrame = 0;
+    bestStrangerDistanceThisFrame = inf;
 
     % Draw results
     if ~isempty(scaledBox)
@@ -82,6 +113,7 @@ while ishandle(gcf)
             end
 
             [bestDistance, bestIdx] = min(pdist2(double(lbpVector), trainedFeatures, 'euclidean'));
+            fprintf('Best distance: %.4f | Best match: %s\n', bestDistance, trainedLabels(bestIdx));
             confidence = max(0, 1 - (bestDistance / distanceThreshold));
 
             if bestDistance <= distanceThreshold
@@ -89,13 +121,18 @@ while ishandle(gcf)
                 labels(i) = "Registered: " + trainedLabels(bestIdx) + " | confidence: " + sprintf('%.0f%%', confidence * 100);
             else
                 labels(i) = "Stranger";
+                strangerThisFrame = strangerThisFrame + 1;
+
+                if bestDistance < bestStrangerDistanceThisFrame
+                    bestStrangerDistanceThisFrame = bestDistance;
+                end
             end
         end
 
         % Update cumulative live metrics from all detections in this frame.
         detectionsThisFrame = size(scaledBox, 1);
         registeredThisFrame = nnz(isRegistered);
-        strangerThisFrame = detectionsThisFrame - registeredThisFrame;
+        %strangerThisFrame = detectionsThisFrame - registeredThisFrame;
 
         liveEval.totalDetections = liveEval.totalDetections + detectionsThisFrame;
         liveEval.registeredDetections = liveEval.registeredDetections + registeredThisFrame;
@@ -125,10 +162,73 @@ while ishandle(gcf)
             'BoxColor', 'black', 'TextColor', 'white', 'FontSize', 16);
     end
 
+    % Stranger logging
+    nowTime = datetime('now');
+
+    if strangerThisFrame > 0
+        strangerFrameCount = strangerFrameCount + 1;
+    else
+        strangerFrameCount = 0;
+    end
+
+    if strangerFrameCount >= strangerFramesNeeded && ~isRecording
+        if isempty(lastRecordingEndTime) || seconds(nowTime - lastRecordingEndTime) >= cooldownSec
+            timestampStr = string(nowTime, 'yyyy-MM-dd_HH-mm-ss');
+            videoName = "stranger_" + timestampStr + ".mp4";
+            videoPath = fullfile(logFolder, char(videoName));
+
+            videoWriter = VideoWriter(videoPath, 'MPEG-4');
+            videoWriter.FrameRate = desiredFPS;
+            open(videoWriter);
+
+            triggerStrangerCount = strangerThisFrame;
+            maxStrangerCount = strangerThisFrame;
+            eventBestDistance = bestStrangerDistanceThisFrame;
+            currentVideoName = videoName;
+
+            isRecording = true;
+            recordStartTime = nowTime;
+            strangerFrameCount = 0;
+        end
+    end
+
+    if isRecording
+        maxStrangerCount = max(maxStrangerCount, strangerThisFrame);
+
+        if strangerThisFrame > 0 && bestStrangerDistanceThisFrame < eventBestDistance
+            eventBestDistance = bestStrangerDistanceThisFrame;
+        end
+
+        writeVideo(videoWriter, outFrame);
+
+        if seconds(nowTime - recordStartTime) >= recordDurationSec
+            close(videoWriter);
+            isRecording = false;
+            lastRecordingEndTime = nowTime;
+
+            if isinf(eventBestDistance)
+                eventBestDistance = -1;
+            end
+
+            fid = fopen(logFile, 'a');
+            fprintf(fid, '%s,%s,%d,%d,%.4f\n', ...
+                char(string(recordStartTime, 'yyyy-MM-dd HH:mm:ss')), ...
+                char(currentVideoName), ...
+                triggerStrangerCount, ...
+                maxStrangerCount, ...
+                eventBestDistance);
+            fclose(fid);
+        end
+    end
+
     imshow(outFrame);
     pause(pauseTime);
     title('Live Face Detection - Press Ctrl+C in Command Window to stop');
     drawnow;
+end
+
+if isRecording
+    close(videoWriter);
 end
 
 clear cam;
