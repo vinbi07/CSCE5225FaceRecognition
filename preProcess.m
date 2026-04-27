@@ -1,4 +1,4 @@
-function outFrame = preProcess(inFrame, targetSize)
+function [outFrame, debugSteps] = preProcess(inFrame, targetSize)
 % Addison Nally, Joey Suliguin
 % preProcess.m
 % Simple preprocessing for face detection
@@ -11,14 +11,19 @@ if nargin < 2 || isempty(targetSize)
     targetSize = [200 200];
 end
 
+debugSteps = struct();
+
+% Check if grayscale
 if size(inFrame, 3) == 3
     grayFrame = rgb2gray(inFrame);
 else
     grayFrame = inFrame;
 end
+debugSteps.grayFrame = grayFrame;
 
 % Resize to target size
 resizedFrame = imresize(grayFrame, targetSize);
+debugSteps.resizedFrame = resizedFrame;
 
 gDouble = double(resizedFrame);
 % normalize
@@ -26,14 +31,12 @@ gDouble = gDouble / 255;
 
 % normalize the image with gamma correction (brightness)
 gammaNormalized = uint8(gDouble .^ 0.8 * 255);
-
-% Apply adaptive histogram equalization for lighting robustness
-eqFrame = adapthisteq(gammaNormalized, 'ClipLimit', 0.02, 'NumTiles', [8 8]);
+debugSteps.gammaNormalized = gammaNormalized;
 
 % Apply Gaussian filtering for noise reduction
 %filteredFrame = imgaussfilt(resizedFrame, 1.0);
 
-filteredDouble = double(eqFrame);
+filteredDouble = double(gammaNormalized);
 minVal = min(filteredDouble(:));
 maxVal = max(filteredDouble(:));
 
@@ -44,4 +47,5 @@ else
 end
 
 outFrame = uint8(normalizedFrame);
+debugSteps.normalizedFrame = outFrame;
 end

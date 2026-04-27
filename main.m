@@ -88,21 +88,12 @@ while ishandle(fig) && ~getappdata(fig, 'stopRequested')
     % Get frame from camera
     frame = snapshot(cam);
 
-    % convert the frame to grayscale, and use this frame to detect the faces
-    % and assign labels
-    if size(frame, 3) == 3
-        grayFrame = rgb2gray(frame);
-    else
-        grayFrame = frame;
-    end
-
-    % Use light normalization for lighting
-    detectionGray = adapthisteq(grayFrame, 'ClipLimit', 0.01, 'NumTiles', [8 8]);
-
+    % Apply the shared full-frame preprocessing used before detection.
+    detectionFrame = prepareDetectionFrame(frame);
 
     % downsample so that the calculations can be run faster
     detectionScale = 0.18; % change this if its laggy, lower = more accurate
-    smallGray = imresize(detectionGray, detectionScale);
+    smallGray = imresize(detectionFrame, detectionScale);
     boundingBox = detectFace(smallGray);
 
     scaledBox = boundingBox;
@@ -121,7 +112,7 @@ while ishandle(fig) && ~getappdata(fig, 'stopRequested')
 
         for i = 1:size(scaledBox, 1)
             box = scaledBox(i, :);
-            lbpVector = algoProcess(grayFrame, box, targetSize);
+            lbpVector = algoProcess(detectionFrame, box, targetSize);
 
             if isempty(lbpVector)
                 labels(i) = "Stranger";

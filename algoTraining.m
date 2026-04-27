@@ -14,9 +14,6 @@ end
 % Crop Size
 targetSize = [200 200];
 
-% Initialize the face detector
-detector = vision.CascadeObjectDetector('FrontalFaceCART');
-
 % Point to the folder containing subfolders for each person
 imds = imageDatastore(trainingDir, 'IncludeSubfolders', true, 'LabelSource', 'foldernames');
 
@@ -37,15 +34,10 @@ skippedNoFace = 0;
 for i = 1:imageFiles
     frame = readimage(imds, i);
 
-    % Check if Gray if not convert to gray
-    if size(frame, 3) == 3
-        grayFrame = rgb2gray(frame);
-    else
-        grayFrame = frame;
-    end
+    detectionFrame = prepareDetectionFrame(frame);
 
-    % Detect the faces in the image
-    boxes = detector(grayFrame);
+    % Detect faces using detectFace function from detectFace.m
+    boxes = detectFace(detectionFrame);
 
     % If no face, skip and +1 to skippedNoFace
     if isempty(boxes)
@@ -58,7 +50,7 @@ for i = 1:imageFiles
     [~, idx] = max(areas);
     faceBox = boxes(idx, :);
 
-    faceCrop = imcrop(grayFrame, faceBox);
+    faceCrop = imcrop(detectionFrame, faceBox);
 
     % If crop empty, skip and +1 to skippedNoFace
     if isempty(faceCrop)
