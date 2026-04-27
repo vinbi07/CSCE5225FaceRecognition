@@ -39,10 +39,10 @@ if isempty(faceCrop)
 end
 
 [processedFace, debugSteps] = preProcess(faceCrop, targetSize);
-annotatedFrame = insertShape(detectionFrame, 'Rectangle', faceBox, 'Color', 'green', 'LineWidth', 6);
-labelPosition = [faceBox(1), max(1, faceBox(2) - 25)];
-annotatedFrame = insertText(annotatedFrame, labelPosition, 'Largest Face', ...
-    'BoxColor', 'green', 'TextColor', 'black', 'FontSize', 18);
+previewPadding = 12;
+paddedDetectionFrame = padarray(detectionFrame, [previewPadding previewPadding], 'replicate', 'both');
+paddedFaceBox = faceBox + [previewPadding previewPadding 0 0];
+labelPosition = [paddedFaceBox(1), max(1, paddedFaceBox(2) - 25)];
 
 fig = figure('Name', 'Algo Training Pipeline', 'NumberTitle', 'off');
 tiledlayout(fig, 3, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
@@ -64,7 +64,13 @@ imshow(detectionSteps.denoisedFrame);
 title('3. Denoised Frame (used by detectFace)', 'Interpreter', 'none');
 
 nexttile;
-imshow(annotatedFrame);
+imshow(paddedDetectionFrame);
+hold on;
+rectangle('Position', paddedFaceBox, 'EdgeColor', 'g', 'LineWidth', 3);
+text(labelPosition(1), labelPosition(2), 'Largest Face', ...
+    'Color', 'black', 'BackgroundColor', 'green', 'FontSize', 12, ...
+    'Margin', 2, 'Interpreter', 'none');
+hold off;
 title('4. Largest Returned Face Selected', 'Interpreter', 'none');
 
 nexttile;
@@ -84,7 +90,4 @@ imshow(processedFace);
 title('8. Input to extractLBPFeatures', 'Interpreter', 'none');
 
 sgtitle(sprintf('Algo Training Pipeline: %s', imagePath), 'Interpreter', 'none');
-annotation(fig, 'textbox', [0.12 0.01 0.78 0.05], ...
-    'String', 'The shared detection preprocessing now does grayscale, adaptive histogram equalization, and denoising before detectFace; the cropped face then goes through resize, gamma correction, and min-max normalization.', ...
-    'EdgeColor', 'none', 'HorizontalAlignment', 'center', 'FontWeight', 'bold');
 end
