@@ -39,7 +39,7 @@ liveEval.registeredDetections = 0;
 liveEval.strangerDetections = 0;
 liveEval.frameCount = 0;
 
-desiredFPS = 15;
+desiredFPS = 10;
 pauseTime = 1 / (2*desiredFPS); % multiply by 2 to account for processing time
 
 % Stranger logging setup
@@ -67,7 +67,7 @@ recordStartTime = [];
 lastRecordingEndTime = [];
 videoWriter = [];
 strangerFrameCount = 0;
-strangerFramesNeeded = 3; % number of consecutive frames with strangers before logging (to avoid false positives)
+strangerFramesNeeded = 5; % number of consecutive frames with strangers before logging (to avoid false positives)
 
 fig = figure( ...
     'Name', 'Live Face Detection', ...
@@ -96,13 +96,13 @@ while ishandle(fig) && ~getappdata(fig, 'stopRequested')
         grayFrame = frame;
     end
 
-    % Apply adaptive histogram equalization for possible lighting issues
-    normGray = adapthisteq(grayFrame, 'ClipLimit', 0.01, 'NumTiles', [8 8]);
+    % Use light normalization for lighting
+    detectionGray = adapthisteq(grayFrame, 'ClipLimit', 0.01, 'NumTiles', [8 8]);
 
 
     % downsample so that the calculations can be run faster
     detectionScale = 0.18; % change this if its laggy, lower = more accurate
-    smallGray = imresize(normGray, detectionScale);
+    smallGray = imresize(detectionGray, detectionScale);
     boundingBox = detectFace(smallGray);
 
     scaledBox = boundingBox;
@@ -121,7 +121,7 @@ while ishandle(fig) && ~getappdata(fig, 'stopRequested')
 
         for i = 1:size(scaledBox, 1)
             box = scaledBox(i, :);
-            lbpVector = algoProcess(normGray, box, targetSize);
+            lbpVector = algoProcess(grayFrame, box, targetSize);
 
             if isempty(lbpVector)
                 labels(i) = "Stranger";
