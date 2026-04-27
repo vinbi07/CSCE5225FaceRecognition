@@ -7,6 +7,7 @@ clc;
 close all;
 
 cam = webcam;
+cleanupObj = onCleanup(@() cleanupResources());
 
 targetSize = [200 200];
 
@@ -24,15 +25,19 @@ if isempty(trainedFeatures)
     error('Model is empty. Re-run algoTraining.');
 end
 
+recognition = [];
+if isfield(modelData.model, 'recognition')
+    recognition = modelData.model.recognition;
+end
+
+recognition = ensureRecognitionConfig(recognition);
+fprintf('Recognition threshold: %.4f\n', recognition.distanceThreshold);
+
 % Dynamic live metrics (no manual label input required).
 liveEval.totalDetections = 0;
 liveEval.registeredDetections = 0;
 liveEval.strangerDetections = 0;
 liveEval.frameCount = 0;
-
-% PLACEHOLDER: Change if too many strangers are marked as registered (or vice versa).
-% FIX: Calculate Distance
-distanceThreshold = 0.15; % Adjust based on validation results (lower = stricter match, higher = more lenient)
 
 desiredFPS = 15;
 pauseTime = 1 / (2*desiredFPS); % multiply by 2 to account for processing time
@@ -64,11 +69,22 @@ videoWriter = [];
 strangerFrameCount = 0;
 strangerFramesNeeded = 3; % number of consecutive frames with strangers before logging (to avoid false positives)
 
-figure;
+fig = figure( ...
+    'Name', 'Live Face Detection', ...
+    'NumberTitle', 'off', ...
+    'KeyPressFcn', @handleFigureKeyPress, ...
+    'CloseRequestFcn', @handleFigureClose);
+setappdata(fig, 'stopRequested', false);
+
+uicontrol( ...
+    'Style', 'pushbutton', ...
+    'String', 'Stop', ...
+    'Position', [10 10 80 30], ...
+    'Callback', @handleStopButton);
 
 
 
-while ishandle(gcf)
+while ishandle(fig) && ~getappdata(fig, 'stopRequested')
     % Get frame from camera
     frame = snapshot(cam);
 
@@ -86,7 +102,7 @@ while ishandle(gcf)
 
     % downsample so that the calculations can be run faster
     detectionScale = 0.18; % change this if its laggy, lower = more accurate
-    smallGray = imresize(grayFrame, detectionScale);
+    smallGray = imresize(normGray, detectionScale);
     boundingBox = detectFace(smallGray);
 
     scaledBox = boundingBox;
@@ -105,26 +121,30 @@ while ishandle(gcf)
 
         for i = 1:size(scaledBox, 1)
             box = scaledBox(i, :);
-            lbpVector = algoProcess(grayFrame, box, targetSize);
+            lbpVector = algoProcess(normGray, box, targetSize);
 
             if isempty(lbpVector)
                 labels(i) = "Stranger";
                 continue;
             end
 
-            [bestDistance, bestIdx] = min(pdist2(double(lbpVector), trainedFeatures, 'euclidean'));
-            fprintf('Best distance: %.4f | Best match: %s\n', bestDistance, trainedLabels(bestIdx));
-            confidence = max(0, 1 - (bestDistance / distanceThreshold));
+            matchResult = matchRegisteredFace(double(lbpVector), trainedFeatures, trainedLabels, recognition);
+            fprintf('Best label: %s | Distance: %.4f | Confidence: %.0f%% | Result: %s\n', ...
+                matchResult.label, ...
+                matchResult.distance, ...
+                matchResult.confidence * 100, ...
+                string(ternary(matchResult.isRegistered, "Registered", "Stranger")));
 
-            if bestDistance <= distanceThreshold
+            if matchResult.isRegistered
                 isRegistered(i) = true;
-                labels(i) = "Registered: " + trainedLabels(bestIdx) + " | confidence: " + sprintf('%.0f%%', confidence * 100);
+                labels(i) = "Registered: " + matchResult.label + " | confidence: " + ...
+                    sprintf('%.0f%%', matchResult.confidence * 100);
             else
                 labels(i) = "Stranger";
                 strangerThisFrame = strangerThisFrame + 1;
 
-                if bestDistance < bestStrangerDistanceThisFrame
-                    bestStrangerDistanceThisFrame = bestDistance;
+                if matchResult.distance < bestStrangerDistanceThisFrame
+                    bestStrangerDistanceThisFrame = matchResult.distance;
                 end
             end
         end
@@ -221,9 +241,9 @@ while ishandle(gcf)
         end
     end
 
-    imshow(outFrame);
+    imshow(outFrame, 'Parent', gca);
     pause(pauseTime);
-    title('Live Face Detection - Press Ctrl+C in Command Window to stop');
+    title('Live Face Detection - Press Esc, Q, or click Stop to exit');
     drawnow;
 end
 
@@ -232,3 +252,61 @@ if isRecording
 end
 
 clear cam;
+
+if ishandle(fig)
+    delete(fig);
+end
+
+function recognition = ensureRecognitionConfig(recognition)
+if nargin < 1 || isempty(recognition)
+    recognition = struct();
+end
+
+if ~isfield(recognition, 'distanceThreshold') || isempty(recognition.distanceThreshold) ...
+        || ~isfinite(recognition.distanceThreshold) || recognition.distanceThreshold <= 0
+    recognition.distanceThreshold = 0.60;
+end
+end
+
+function matchResult = matchRegisteredFace(lbpVector, trainedFeatures, trainedLabels, recognition)
+sampleDistances = pdist2(lbpVector, trainedFeatures, 'euclidean');
+[bestDistance, bestIdx] = min(sampleDistances);
+bestLabel = trainedLabels(bestIdx);
+isRegistered = bestDistance <= recognition.distanceThreshold;
+confidence = max(0, 1 - (bestDistance / recognition.distanceThreshold));
+
+matchResult = struct();
+matchResult.label = bestLabel;
+matchResult.distance = bestDistance;
+matchResult.isRegistered = isRegistered;
+matchResult.confidence = confidence;
+end
+
+function handleStopButton(~, ~)
+fig = gcbf;
+if ~isempty(fig) && ishandle(fig)
+    setappdata(fig, 'stopRequested', true);
+end
+end
+
+function handleFigureKeyPress(src, event)
+if ismember(lower(event.Key), {'escape', 'q'})
+    setappdata(src, 'stopRequested', true);
+end
+end
+
+function handleFigureClose(src, ~)
+setappdata(src, 'stopRequested', true);
+end
+
+function cleanupResources()
+clear cam;
+end
+
+function value = ternary(condition, trueValue, falseValue)
+if condition
+    value = trueValue;
+else
+    value = falseValue;
+end
+end
