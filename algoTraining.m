@@ -30,6 +30,7 @@ end
 features = [];
 trainedLabels = categorical.empty(0, 1);
 previewFaces = {};
+previewFaceLabels = strings(0, 1);
 skippedNoFace = 0;
 
 % Go through the images
@@ -75,6 +76,7 @@ for i = 1:imageFiles
     features = [features; LBPVector];
     trainedLabels = [trainedLabels; imds.Labels(i)];
     previewFaces{end + 1, 1} = processedFace;
+    previewFaceLabels(end + 1, 1) = string(imds.Labels(i)) + " | original";
 
     % Perform some data augmentation
     % we will flip the face horizontally, rotate it, and adjust brightness for each one
@@ -107,6 +109,24 @@ for i = 1:imageFiles
         % update features and labels
         features = [features; augLBP];
         trainedLabels = [trainedLabels; imds.Labels(i)];
+        previewFaces{end + 1, 1} = augProcessed;
+
+        switch a
+            case 1
+                augName = "flip";
+            case 2
+                augName = "rotate -10";
+            case 3
+                augName = "rotate +10";
+            case 4
+                augName = "gamma 0.8";
+            case 5
+                augName = "gamma 1.2";
+            otherwise
+                augName = "augmented";
+        end
+
+        previewFaceLabels(end + 1, 1) = string(imds.Labels(i)) + " | " + augName;
     end
 end
 
@@ -121,7 +141,7 @@ model.targetSize = targetSize;
 model.features = features;
 model.labels = trainedLabels;
 model.previewFaces = previewFaces;
-model.previewLabels = string(trainedLabels);
+model.previewLabels = previewFaceLabels;
 
 labelCats = categorical(trainedLabels);
 faceNames = categories(labelCats);
