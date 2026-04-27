@@ -17,19 +17,25 @@ else
     grayFrame = inFrame;
 end
 
-% Apply adaptive histogram equalization for lighting robustness
-eqFrame = adapthisteq(grayFrame, 'ClipLimit', 0.02, 'NumTiles', [8 8]);
-
 % Resize to target size
-resizedFrame = imresize(eqFrame, targetSize);
+resizedFrame = imresize(grayFrame, targetSize);
+
+gDouble = double(resizedFrame);
+% normalize
+gDouble = gDouble / 255;
+
+% normalize the image with gamma correction (brightness)
+gammaNormalized = uint8(gDouble .^ 0.8 * 255);
+
+% Apply adaptive histogram equalization for lighting robustness
+eqFrame = adapthisteq(gammaNormalized, 'ClipLimit', 0.02, 'NumTiles', [8 8]);
 
 % Apply Gaussian filtering for noise reduction
-filteredFrame = imgaussfilt(resizedFrame, 1.0);
+%filteredFrame = imgaussfilt(resizedFrame, 1.0);
 
-% Normalize intensity range to [0, 255]
-filteredDouble = double(filteredFrame);
-minVal = double(min(filteredFrame(:)));
-maxVal = double(max(filteredFrame(:)));
+filteredDouble = double(eqFrame);
+minVal = double(min(filteredDouble(:)));
+maxVal = double(max(filteredDouble(:)));
 normalizedFrame = (filteredDouble - minVal) / (maxVal - minVal) * 255;
 outFrame = uint8(normalizedFrame);
 end
