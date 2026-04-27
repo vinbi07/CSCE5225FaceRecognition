@@ -255,7 +255,7 @@ end
 
 if ~isfield(recognition, 'distanceThreshold') || isempty(recognition.distanceThreshold) ...
         || ~isfinite(recognition.distanceThreshold) || recognition.distanceThreshold <= 0
-    recognition.distanceThreshold = 0.65;
+    recognition.distanceThreshold = 0.75;
 end
 
 if ~isfield(recognition, 'confidenceMinDistance') || isempty(recognition.confidenceMinDistance) ...
