@@ -176,8 +176,8 @@ while ishandle(fig) && ~getappdata(fig, 'stopRequested')
 
     if liveEval.totalDetections > 0
         runningAccuracy = 100 * (liveEval.registeredDetections / liveEval.totalDetections);
-        statusText = sprintf('Cumulative | Frames: %d | Detections: %d | Registered Rate: %.2f%%', ...
-            liveEval.frameCount, liveEval.totalDetections, runningAccuracy);
+        statusText = sprintf('Cumulative | Frames: %d | Detections: %d', ...
+            liveEval.frameCount, liveEval.totalDetections);
         outFrame = insertText(outFrame, [10 40], statusText, ...
             'BoxColor', 'black', 'TextColor', 'white', 'FontSize', 16);
     end
@@ -264,7 +264,7 @@ end
 
 if ~isfield(recognition, 'distanceThreshold') || isempty(recognition.distanceThreshold) ...
         || ~isfinite(recognition.distanceThreshold) || recognition.distanceThreshold <= 0
-    recognition.distanceThreshold = 0.60;
+    recognition.distanceThreshold = 0.85;
 end
 end
 
