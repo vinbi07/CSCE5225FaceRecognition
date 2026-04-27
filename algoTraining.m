@@ -130,6 +130,7 @@ hasSamples = faceCounts > 0;
 
 model.registeredFaces = string(faceNames(hasSamples));
 model.samplesPerFace = faceCounts(hasSamples);
+model.recognition = buildRecognitionConfig(double(features), string(trainedLabels));
 
 save(outputMatPath, 'model');
 
@@ -140,4 +141,32 @@ fprintf('Skipped (no face): %d\n', skippedNoFace);
 fprintf('Model saved to: %s\n', outputMatPath);
 fprintf('Preview: run showModelMontage to see saved face crops.\n');
 end
+
+function recognition = buildRecognitionConfig(features, trainedLabels)
+distanceMatrix = pdist2(features, features, 'euclidean');
+sampleCount = size(distanceMatrix, 1);
+distanceMatrix(1:sampleCount+1:end) = inf;
+
+nearestSame = [];
+
+for i = 1:sampleCount
+    sameMask = trainedLabels == trainedLabels(i);
+    sameMask(i) = false;
+
+    if any(sameMask)
+        nearestSame(end + 1) = min(distanceMatrix(i, sameMask)); %#ok<AGROW>
+    end
+end
+
+if isempty(nearestSame)
+    distanceThreshold = 0.60;
+else
+    distanceThreshold = prctile(nearestSame, 90);
+end
+
+recognition = struct();
+recognition.distanceThreshold = max(distanceThreshold, 0.05);
+recognition.marginRatioThreshold = 0.92;
+end
+
 
