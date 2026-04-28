@@ -171,7 +171,7 @@ end
 if isempty(nearestSame)
     distanceThreshold = 0.60;
 else
-    distanceThreshold = prctile(nearestSame, 90);
+    distanceThreshold = prctile(nearestSame, 95);
 end
 
 confidenceMinDistance = minOrFallback(nearestSame, 0);
