@@ -100,7 +100,7 @@ while ishandle(fig) && ~getappdata(fig, 'stopRequested')
     detectionFrame = prepareDetectionFrame(frame);
 
     % downsample so that the calculations can be run faster
-    detectionScale = 0.18; % change this if its laggy, lower = more accurate
+    detectionScale = 0.25; % change this if its laggy, lower = more accurate
     smallGray = imresize(detectionFrame, detectionScale);
     boundingBox = detectFace(smallGray);
 
@@ -302,7 +302,7 @@ end
 
 if ~isfield(recognition, 'distanceThreshold') || isempty(recognition.distanceThreshold) ...
         || ~isfinite(recognition.distanceThreshold) || recognition.distanceThreshold <= 0
-    recognition.distanceThreshold = 0.75;
+    recognition.distanceThreshold = 0.8;
 end
 
 if ~isfield(recognition, 'confidenceMinDistance') || isempty(recognition.confidenceMinDistance) ...
@@ -313,7 +313,7 @@ end
 if ~isfield(recognition, 'confidenceMaxDistance') || isempty(recognition.confidenceMaxDistance) ...
         || ~isfinite(recognition.confidenceMaxDistance) ...
         || recognition.confidenceMaxDistance <= recognition.confidenceMinDistance
-    recognition.confidenceMaxDistance = max(recognition.distanceThreshold, recognition.confidenceMinDistance + 0.05);
+    recognition.confidenceMaxDistance = max(recognition.distanceThreshold);
 end
 end
 
