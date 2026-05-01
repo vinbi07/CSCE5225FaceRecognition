@@ -1,7 +1,6 @@
-% Joey Suliguin: Model for training for Face Recognition
 function model = algoTraining(trainingDir, outputMatPath)
 
-% Get Paths
+% Input Arguments:
 if nargin < 1 || isempty(trainingDir)
     trainingDir = fullfile(fileparts(mfilename('fullpath')), 'trainingImages');
 end
@@ -10,97 +9,80 @@ if nargin < 2 || isempty(outputMatPath)
     outputMatPath = fullfile(fileparts(mfilename('fullpath')), 'trainedFaceModel.mat');
 end
 
-
-% Crop Size
+% Size for face crops for better processing
 targetSize = [200 200];
 
-% Point to the folder containing subfolders for each person
+% Load training images
 imds = imageDatastore(trainingDir, 'IncludeSubfolders', true, 'LabelSource', 'foldernames');
 
-% Get Image Files
 imageFiles = numel(imds.Files);
 if imageFiles == 0
     error('No training images found in: %s', trainingDir);
 end
 
-% Arrays to hold features and labels
+% Make Storage for features and labels
 features = [];
 trainedLabels = categorical.empty(0, 1);
 previewFaces = {};
 previewFaceLabels = strings(0, 1);
 skippedNoFace = 0;
 
-% Go through the images
+% Loop for getting faces and features
 for i = 1:imageFiles
     frame = readimage(imds, i);
 
+    % Pre Process for Detection
     detectionFrame = prepareDetectionFrame(frame);
-
-    % Detect faces using detectFace function from detectFace.m
     boxes = detectFace(detectionFrame);
 
-    % If no face, skip and +1 to skippedNoFace
     if isempty(boxes)
         skippedNoFace = skippedNoFace + 1;
         continue;
     end
 
-    % Use the largest detected face for crop
+    % Grabbign the largest face from detectface.m
     areas = boxes(:, 3) .* boxes(:, 4);
     [~, idx] = max(areas);
     faceBox = boxes(idx, :);
 
     faceCrop = imcrop(detectionFrame, faceBox);
 
-    % If crop empty, skip and +1 to skippedNoFace
     if isempty(faceCrop)
         skippedNoFace = skippedNoFace + 1;
         continue;
     end
 
-    % Process the face crop and extract LBP features
+    % Pre Process before feature extraction
     processedFace = preProcess(faceCrop, targetSize);
     LBPVector = extractLBPFeatures(processedFace);
 
-    % Append the original vector as a new row
+    % Storing Data
     features = [features; LBPVector];
     trainedLabels = [trainedLabels; imds.Labels(i)];
     previewFaces{end + 1, 1} = processedFace;
     previewFaceLabels(end + 1, 1) = string(imds.Labels(i)) + " | original";
 
-    % Perform some data augmentation
-    % we will flip the face horizontally, rotate it, and adjust brightness for each one
-    % each photo will have 5 variations stored in memory
-
-    % this augmentation is meant to help the model learn to recognize faces
-    % in different conditions/orientations/lighting
+    % Augementing Data - Flips, Rotations, and Gamma Adjustments
     augs = { ...
-        fliplr(faceCrop), ...                              % flip about the y-axis
-        imrotate(faceCrop, -10, 'bilinear', 'crop'), ...  % 10 degrees rotation left and right
+        fliplr(faceCrop), ...
+        imrotate(faceCrop, -10, 'bilinear', 'crop'), ...
         imrotate(faceCrop,  10, 'bilinear', 'crop'), ...
-        imadjust(faceCrop, [], [], 0.8), ...               % slightly brighter (gamma < 1)
-        imadjust(faceCrop, [], [], 1.2), ...               % slightly darker (gamma > 1)
+        imadjust(faceCrop, [], [], 0.8), ...
+        imadjust(faceCrop, [], [], 1.2), ...
         };
 
-    % loop through that array of augmentations and extract the features for each
-    % Store LBP for each file
     for a = 1:numel(augs)
-
-        % take current
         augCrop = augs{a};
         if isempty(augCrop), continue; end
 
-        % preprocess it
         augProcessed = preProcess(augCrop, targetSize);
-
-        % extract features
         augLBP = extractLBPFeatures(augProcessed);
 
-        % update features and labels
         features = [features; augLBP];
         trainedLabels = [trainedLabels; imds.Labels(i)];
         previewFaces{end + 1, 1} = augProcessed;
 
+        % Add Labels for Augmentations
         switch a
             case 1
                 augName = "flip";
@@ -120,12 +102,11 @@ for i = 1:imageFiles
     end
 end
 
-% Check if any features were extracted
 if isempty(features)
     error('No valid faces were extracted. Check training images and detector settings.');
 end
 
-% Save the model & Get Results
+% Model Structure
 model = struct();
 model.targetSize = targetSize;
 model.features = features;
@@ -142,16 +123,18 @@ model.registeredFaces = string(faceNames(hasSamples));
 model.samplesPerFace = faceCounts(hasSamples);
 model.recognition = buildRecognitionConfig(double(features), string(trainedLabels));
 
+% Save the model
 save(outputMatPath, 'model');
 
+% Output Summary
 fprintf('Training complete.\n');
 fprintf('Images scanned: %d\n', imageFiles);
 fprintf('Faces learned: %d\n', size(features, 1));
 fprintf('Skipped (no face): %d\n', skippedNoFace);
 fprintf('Model saved to: %s\n', outputMatPath);
-fprintf('Preview: run showModelMontage to see saved face crops.\n');
 end
 
+% Build reccognition config based on Euclidean distance
 function recognition = buildRecognitionConfig(features, trainedLabels)
 distanceMatrix = pdist2(features, features, 'euclidean');
 sampleCount = size(distanceMatrix, 1);
@@ -159,6 +142,7 @@ distanceMatrix(1:sampleCount+1:end) = inf;
 
 nearestSame = [];
 
+% Find closest sample of same person
 for i = 1:sampleCount
     sameMask = trainedLabels == trainedLabels(i);
     sameMask(i) = false;
@@ -168,22 +152,24 @@ for i = 1:sampleCount
     end
 end
 
+% Calc thresholds based on if it will be in the 90th percentile
 if isempty(nearestSame)
-    distanceThreshold = 0.60;
+    distanceThreshold = 0.60; % In case someone only has one pic
 else
-    distanceThreshold = prctile(nearestSame, 95);
+    distanceThreshold = prctile(nearestSame, 90);
 end
 
 confidenceMinDistance = minOrFallback(nearestSame, 0);
 confidenceMaxDistance = maxOrFallback(nearestSame, distanceThreshold);
 
+% Save
 recognition = struct();
 recognition.distanceThreshold = max(distanceThreshold, 0.05);
-recognition.marginRatioThreshold = 0.92;
 recognition.confidenceMinDistance = max(confidenceMinDistance, 0);
 recognition.confidenceMaxDistance = max(confidenceMaxDistance, recognition.confidenceMinDistance + 0.05);
 end
 
+% Function for calc min or fallback value
 function value = minOrFallback(values, fallbackValue)
 if isempty(values)
     value = fallbackValue;

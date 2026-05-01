@@ -1,9 +1,7 @@
 function report = evaluateVideoRecognition(videoPath, expectedLabel, maxDurationSec, desiredFPS, smoothingWindowSize, showPreview, printPerFrameDebug)
-% evaluateVideoRecognition Evaluate recognition accuracy on a video clip.
-%
-% Example:
-%   report = evaluateVideoRecognition('testVideos/videoPlaceholder.mp4', "Joey");
+% Test the recognizer on a video clip. Same as main mostly
 
+% Get Necessary Inputs with defaults
 if nargin < 1 || isempty(videoPath)
     videoPath = fullfile(fileparts(mfilename('fullpath')), 'testVideos', 'videoPlaceholder.mp4');
 end
@@ -38,6 +36,7 @@ if ~isfile(videoPath)
     error('Video file not found: %s', videoPath);
 end
 
+% Parameters for processing
 targetSize = [200 200];
 detectionScale = 0.18;
 
@@ -46,6 +45,7 @@ if ~isfile(modelPath)
     error('Model file not found. Run algoTraining first.');
 end
 
+% Load model
 modelData = load(modelPath, 'model');
 trainedFeatures = double(modelData.model.features);
 trainedLabels = string(modelData.model.labels);
@@ -54,12 +54,14 @@ if isempty(trainedFeatures)
     error('Model is empty. Re-run algoTraining.');
 end
 
+% Get the recognition from traininng
 recognition = [];
 if isfield(modelData.model, 'recognition')
     recognition = modelData.model.recognition;
 end
 recognition = ensureRecognitionConfig(recognition);
 
+% Open video and setup for processing
 videoReader = VideoReader(videoPath);
 maxProcessTime = min(maxDurationSec, videoReader.Duration);
 sampleInterval = 1 / desiredFPS;
@@ -73,21 +75,24 @@ if showPreview
     fig = figure('Name', 'Video Recognition Evaluation', 'NumberTitle', 'off');
 end
 
+% Video loop to process frames
 while hasFrame(videoReader) && videoReader.CurrentTime <= maxProcessTime
     frame = readFrame(videoReader);
     frameTime = videoReader.CurrentTime;
 
+    % Make sure frames are processed at 10 FPS
     if frameTime + eps < nextSampleTime
         continue;
     end
     nextSampleTime = nextSampleTime + sampleInterval;
 
     report.framesProcessed = report.framesProcessed + 1;
-
+    % Pre proccess for detection
     detectionFrame = prepareDetectionFrame(frame);
     smallGray = imresize(detectionFrame, detectionScale);
     boundingBox = detectFace(smallGray);
 
+    % Recale bouding box
     scaledBox = boundingBox;
     if ~isempty(boundingBox)
         scaledBox(:, 1:4) = round(boundingBox(:, 1:4) / detectionScale);
@@ -98,12 +103,15 @@ while hasFrame(videoReader) && videoReader.CurrentTime <= maxProcessTime
     currentConfidence = 0;
     currentDistance = inf;
 
+
     if ~isempty(scaledBox)
+        % Taking the largest face
         areas = scaledBox(:, 3) .* scaledBox(:, 4);
         [~, idx] = max(areas);
         faceBox = scaledBox(idx, :);
         report.framesWithFace = report.framesWithFace + 1;
 
+        % extracting the features and matching
         lbpVector = algoProcess(detectionFrame, faceBox, targetSize);
 
         if isempty(lbpVector)
@@ -111,8 +119,13 @@ while hasFrame(videoReader) && videoReader.CurrentTime <= maxProcessTime
             bestLabel = "No Match";
             isRegistered = false;
         else
+            % Match
             matchResult = matchRegisteredFace(double(lbpVector), trainedFeatures, trainedLabels, recognition);
-            rawLabel = ternary(matchResult.isRegistered, matchResult.label, "Stranger");
+            if matchResult.isRegistered
+                rawLabel = matchResult.label;
+            else
+                rawLabel = "Stranger";
+            end
             bestLabel = matchResult.label;
             isRegistered = matchResult.isRegistered;
             currentConfidence = matchResult.confidence;
@@ -120,16 +133,22 @@ while hasFrame(videoReader) && videoReader.CurrentTime <= maxProcessTime
         end
 
         if printPerFrameDebug
+            if isRegistered
+                resultText = "Registered";
+            else
+                resultText = "Stranger";
+            end
             fprintf(['Frame %d | Best label: %s | Distance: %.4f | Threshold: %.4f | ' ...
                 'Result: %s | Smoothed: %s\n'], ...
                 report.framesProcessed, ...
                 bestLabel, ...
                 currentDistance, ...
                 recognition.distanceThreshold, ...
-                string(ternary(isRegistered, "Registered", "Stranger")), ...
+                string(resultText), ...
                 rawLabel);
         end
 
+        % Temporal Label Smoothing
         labelQueue(end + 1, 1) = rawLabel;
         if numel(labelQueue) > smoothingWindowSize
             labelQueue(1) = [];
@@ -139,6 +158,8 @@ while hasFrame(videoReader) && videoReader.CurrentTime <= maxProcessTime
         if printPerFrameDebug
             fprintf('Frame %d | Queue mode result: %s\n', report.framesProcessed, smoothedLabel);
         end
+
+        % Output results and update report
         report = updateReportCounts(report, smoothedLabel, expectedLabel, currentConfidence, currentDistance);
 
         displayLabel = buildDisplayLabel(smoothedLabel, expectedLabel, currentConfidence);
@@ -152,6 +173,7 @@ while hasFrame(videoReader) && videoReader.CurrentTime <= maxProcessTime
         end
     end
 
+    % Preview window update
     if showPreview && ishandle(fig)
         summaryText = sprintf('Expected: %s | Frame %d | Current: %s', ...
             expectedLabel, report.framesProcessed, smoothedLabel);
@@ -163,10 +185,12 @@ while hasFrame(videoReader) && videoReader.CurrentTime <= maxProcessTime
     end
 end
 
+% Final Report
 report.accuracyOnDetectedFaces = safePercent(report.correctExpectedFrames, report.framesWithFace);
 report.accuracyOverall = safePercent(report.correctExpectedFrames, report.framesProcessed);
 report.noFaceRate = safePercent(report.framesNoFace, report.framesProcessed);
 
+% Summary for data collection
 fprintf('\nVideo Evaluation Summary\n');
 fprintf('Video: %s\n', videoPath);
 fprintf('Expected label: %s\n', expectedLabel);
@@ -185,6 +209,7 @@ if showPreview && ~isempty(fig) && ishandle(fig)
 end
 end
 
+% Functions to help report management
 function report = initializeReport(videoPath, expectedLabel, maxDurationSec, desiredFPS, smoothingWindowSize)
 report = struct();
 report.videoPath = string(videoPath);
@@ -203,6 +228,7 @@ report.distanceSumCorrect = 0;
 report.correctConfidenceSamples = 0;
 end
 
+% Functions to help report management
 function report = updateReportCounts(report, smoothedLabel, expectedLabel, currentConfidence, currentDistance)
 if smoothedLabel == expectedLabel
     report.correctExpectedFrames = report.correctExpectedFrames + 1;
@@ -264,6 +290,7 @@ if ~isfield(recognition, 'confidenceMaxDistance') || isempty(recognition.confide
 end
 end
 
+% Matching the Face
 function matchResult = matchRegisteredFace(lbpVector, trainedFeatures, trainedLabels, recognition)
 sampleDistances = pdist2(lbpVector, trainedFeatures, 'euclidean');
 [bestDistance, bestIdx] = min(sampleDistances);
@@ -278,6 +305,7 @@ matchResult.isRegistered = isRegistered;
 matchResult.confidence = confidence;
 end
 
+% Computing Confdence
 function confidence = computeRangeBasedConfidence(bestDistance, recognition)
 lowerBound = recognition.confidenceMinDistance;
 upperBound = recognition.confidenceMaxDistance;
@@ -292,14 +320,7 @@ else
 end
 end
 
-function value = ternary(condition, trueValue, falseValue)
-if condition
-    value = trueValue;
-else
-    value = falseValue;
-end
-end
-
+% Ensure nothing is divided by 0
 function pct = safePercent(numerator, denominator)
 if denominator <= 0
     pct = 0;
