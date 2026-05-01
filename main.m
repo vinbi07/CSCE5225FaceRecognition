@@ -7,9 +7,9 @@ clc;
 close all;
 
 cam = webcam;
-cleanupObj = onCleanup(@() cleanupResources());
+cleanupObj = onCleanup(@() clear('cam')); % Clear cam so webcam doesnt stay on
 
-targetSize = [200 200];
+targetSize = [200 200]; % Face Crop size
 
 % Joey Suliguin: Load trained model from algoTraining
 modelPath = fullfile(fileparts(mfilename('fullpath')), 'trainedFaceModel.mat');
@@ -25,13 +25,31 @@ if isempty(trainedFeatures)
     error('Model is empty. Re-run algoTraining.');
 end
 
+% Grab The recognition data from Algotraining
 recognition = [];
 if isfield(modelData.model, 'recognition')
     recognition = modelData.model.recognition;
 end
 
-recognition = ensureRecognitionConfig(recognition);
-fprintf('Recognition threshold: %.4f\n', recognition.distanceThreshold);
+if isempty(recognition)
+    recognition = struct();
+end
+
+if ~isfield(recognition, 'distanceThreshold') || isempty(recognition.distanceThreshold) ...
+        || ~isfinite(recognition.distanceThreshold) || recognition.distanceThreshold <= 0
+    recognition.distanceThreshold = 0.8;
+end
+
+if ~isfield(recognition, 'confidenceMinDistance') || isempty(recognition.confidenceMinDistance) ...
+        || ~isfinite(recognition.confidenceMinDistance) || recognition.confidenceMinDistance < 0
+    recognition.confidenceMinDistance = 0;
+end
+
+if ~isfield(recognition, 'confidenceMaxDistance') || isempty(recognition.confidenceMaxDistance) ...
+        || ~isfinite(recognition.confidenceMaxDistance) ...
+        || recognition.confidenceMaxDistance <= recognition.confidenceMinDistance
+    recognition.confidenceMaxDistance = recognition.distanceThreshold;
+end
 
 % Dynamic live metrics (no manual label input required).
 liveEval.totalDetections = 0;
@@ -39,10 +57,10 @@ liveEval.registeredDetections = 0;
 liveEval.strangerDetections = 0;
 liveEval.frameCount = 0;
 
-desiredFPS = 10;
-pauseTime = 1 / (2*desiredFPS); % multiply by 2 to account for processing time
+desiredFPS = 10; % Works better at lower FPS for processing
+pauseTime = 1 / (2*desiredFPS); %  Buffer time
 
-% Temporal smoothing: rolling queue of raw labels per face slot
+% Temporal Label smoothing: rolling queue of raw labels per face slot
 
 % amount of frames to consider for smoothing
 smoothingWindowSize = 10;
@@ -63,6 +81,7 @@ if ~isfile(logFile)
     fclose(fid);
 end
 
+% Logging variabels for strangers
 triggerStrangerCount = 0;
 maxStrangerCount = 0;
 eventBestDistance = inf;
@@ -77,6 +96,7 @@ videoWriter = [];
 strangerFrameCount = 0;
 strangerFramesNeeded = 5; % number of consecutive frames with strangers before logging (to avoid false positives)
 
+% UI for buttons to stop program
 fig = figure( ...
     'Name', 'Live Face Detection', ...
     'NumberTitle', 'off', ...
@@ -91,19 +111,20 @@ uicontrol( ...
     'Callback', @handleStopButton);
 
 
-
+% Main Loop for everything
 while ishandle(fig) && ~getappdata(fig, 'stopRequested')
     % Get frame from camera
     frame = snapshot(cam);
 
-    % Apply the shared full-frame preprocessing used before detection.
+    % Pre Process for detection
     detectionFrame = prepareDetectionFrame(frame);
 
     % downsample so that the calculations can be run faster
-    detectionScale = 0.25; % change this if its laggy, lower = more accurate
+    detectionScale = 0.25; % scale down to 25% of original size for better processing
     smallGray = imresize(detectionFrame, detectionScale);
     boundingBox = detectFace(smallGray);
 
+    % Reset labels every round
     scaledBox = boundingBox;
     if ~isempty(boundingBox)
         scaledBox(:, 1:4) = round(boundingBox(:, 1:4) / detectionScale);
@@ -127,7 +148,7 @@ while ishandle(fig) && ~getappdata(fig, 'stopRequested')
         end
     end
 
-    % Draw results
+    % Draw results for recognition and logging
     if ~isempty(scaledBox)
         labels = strings(size(scaledBox,1), 1);
         isRegistered = false(size(scaledBox,1), 1);
@@ -142,16 +163,37 @@ while ishandle(fig) && ~getappdata(fig, 'stopRequested')
                 currentConfidence = 0;
                 currentDistance = inf;
             else
-                matchResult = matchRegisteredFace(double(lbpVector), trainedFeatures, trainedLabels, recognition);
-                fprintf('Best label: %s | Distance: %.4f | Confidence: %.0f%% | Result: %s\n', ...
-                    matchResult.label, ...
-                    matchResult.distance, ...
-                    matchResult.confidence * 100, ...
-                    string(ternary(matchResult.isRegistered, "Registered", "Stranger")));
+                sampleDistances = pdist2(double(lbpVector), trainedFeatures, 'euclidean');
+                [currentDistance, bestIdx] = min(sampleDistances);
+                bestLabel = trainedLabels(bestIdx);
 
-                rawLabel = ternary(matchResult.isRegistered, matchResult.label, "Stranger");
-                currentConfidence = matchResult.confidence;
-                currentDistance = matchResult.distance;
+                % applying threshold
+                if currentDistance <= recognition.distanceThreshold
+                    rawLabel = bestLabel;
+                    resultText = "Registered";
+                else
+                    rawLabel = "Stranger";
+                    resultText = "Stranger";
+                end
+
+                % Calc Confidence
+                lowerBound = recognition.confidenceMinDistance;
+                upperBound = recognition.confidenceMaxDistance;
+                rangeWidth = max(upperBound - lowerBound, eps);
+
+                if currentDistance <= lowerBound
+                    currentConfidence = 1;
+                elseif currentDistance >= upperBound
+                    currentConfidence = 0;
+                else
+                    currentConfidence = 1 - ((currentDistance - lowerBound) / rangeWidth);
+                end
+
+                fprintf('Best label: %s | Distance: %.4f | Confidence: %.0f%% | Result: %s\n', ...
+                    bestLabel, ...
+                    currentDistance, ...
+                    currentConfidence * 100, ...
+                    resultText);
             end
 
             % push each of the raw labels into the queue for this slot
@@ -207,13 +249,13 @@ while ishandle(fig) && ~getappdata(fig, 'stopRequested')
         outFrame = frame;
     end
 
+    % Display metrics on the frame
     outFrame = insertText(outFrame, [10 10], frameSummary, ...
         'BoxColor', 'black', 'TextColor', 'white', 'FontSize', 16);
 
     liveEval.frameCount = liveEval.frameCount + 1;
 
     if liveEval.totalDetections > 0
-        runningAccuracy = 100 * (liveEval.registeredDetections / liveEval.totalDetections);
         statusText = sprintf('Cumulative | Frames: %d | Detections: %d', ...
             liveEval.frameCount, liveEval.totalDetections);
         outFrame = insertText(outFrame, [10 40], statusText, ...
@@ -229,6 +271,7 @@ while ishandle(fig) && ~getappdata(fig, 'stopRequested')
         strangerFrameCount = 0;
     end
 
+    % If Stranger for more than defined number of frames, start logging
     if strangerFrameCount >= strangerFramesNeeded && ~isRecording
         if isempty(lastRecordingEndTime) || seconds(nowTime - lastRecordingEndTime) >= cooldownSec
             timestampStr = string(nowTime, 'yyyy-MM-dd_HH-mm-ss');
@@ -250,6 +293,7 @@ while ishandle(fig) && ~getappdata(fig, 'stopRequested')
         end
     end
 
+    % if recording strangers, log the video and update csv
     if isRecording
         maxStrangerCount = max(maxStrangerCount, strangerThisFrame);
 
@@ -268,6 +312,7 @@ while ishandle(fig) && ~getappdata(fig, 'stopRequested')
                 eventBestDistance = -1;
             end
 
+            % Append to CSV
             fid = fopen(logFile, 'a');
             fprintf(fid, '%s,%s,%d,%d,%.4f\n', ...
                 char(string(recordStartTime, 'yyyy-MM-dd HH:mm:ss')), ...
@@ -279,72 +324,26 @@ while ishandle(fig) && ~getappdata(fig, 'stopRequested')
         end
     end
 
+    % Display the resulting frame
     imshow(outFrame, 'Parent', gca);
     pause(pauseTime);
     title('Live Face Detection - Press Esc, Q, or click Stop to exit');
     drawnow;
 end
 
+% Clean up for videoWriter if still open
 if isRecording
     close(videoWriter);
 end
 
 clear cam;
 
+% Close the figure if it's still open
 if ishandle(fig)
     delete(fig);
 end
 
-function recognition = ensureRecognitionConfig(recognition)
-if nargin < 1 || isempty(recognition)
-    recognition = struct();
-end
-
-if ~isfield(recognition, 'distanceThreshold') || isempty(recognition.distanceThreshold) ...
-        || ~isfinite(recognition.distanceThreshold) || recognition.distanceThreshold <= 0
-    recognition.distanceThreshold = 0.8;
-end
-
-if ~isfield(recognition, 'confidenceMinDistance') || isempty(recognition.confidenceMinDistance) ...
-        || ~isfinite(recognition.confidenceMinDistance) || recognition.confidenceMinDistance < 0
-    recognition.confidenceMinDistance = 0;
-end
-
-if ~isfield(recognition, 'confidenceMaxDistance') || isempty(recognition.confidenceMaxDistance) ...
-        || ~isfinite(recognition.confidenceMaxDistance) ...
-        || recognition.confidenceMaxDistance <= recognition.confidenceMinDistance
-    recognition.confidenceMaxDistance = max(recognition.distanceThreshold);
-end
-end
-
-function matchResult = matchRegisteredFace(lbpVector, trainedFeatures, trainedLabels, recognition)
-sampleDistances = pdist2(lbpVector, trainedFeatures, 'euclidean');
-[bestDistance, bestIdx] = min(sampleDistances);
-bestLabel = trainedLabels(bestIdx);
-isRegistered = bestDistance <= recognition.distanceThreshold;
-confidence = computeRangeBasedConfidence(bestDistance, recognition);
-
-matchResult = struct();
-matchResult.label = bestLabel;
-matchResult.distance = bestDistance;
-matchResult.isRegistered = isRegistered;
-matchResult.confidence = confidence;
-end
-
-function confidence = computeRangeBasedConfidence(bestDistance, recognition)
-lowerBound = recognition.confidenceMinDistance;
-upperBound = recognition.confidenceMaxDistance;
-rangeWidth = max(upperBound - lowerBound, eps);
-
-if bestDistance <= lowerBound
-    confidence = 1;
-elseif bestDistance >= upperBound
-    confidence = 0;
-else
-    confidence = 1 - ((bestDistance - lowerBound) / rangeWidth);
-end
-end
-
+% Stop Button Callback
 function handleStopButton(~, ~)
 fig = gcbf;
 if ~isempty(fig) && ishandle(fig)
@@ -352,6 +351,7 @@ if ~isempty(fig) && ishandle(fig)
 end
 end
 
+% Other Callbacks for escape keys or close button
 function handleFigureKeyPress(src, event)
 if ismember(lower(event.Key), {'escape', 'q'})
     setappdata(src, 'stopRequested', true);
@@ -360,16 +360,4 @@ end
 
 function handleFigureClose(src, ~)
 setappdata(src, 'stopRequested', true);
-end
-
-function cleanupResources()
-clear cam;
-end
-
-function value = ternary(condition, trueValue, falseValue)
-if condition
-    value = trueValue;
-else
-    value = falseValue;
-end
 end

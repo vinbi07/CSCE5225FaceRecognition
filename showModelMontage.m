@@ -1,7 +1,6 @@
 function showModelMontage(modelPath, maxImages)
-%   showModelMontage('trainedFaceModel.mat')
-%   showModelMontage('trainedFaceModel.mat', 40)
 
+% Input Arguments
 if nargin < 1 || isempty(modelPath)
     modelPath = fullfile(fileparts(mfilename('fullpath')), 'trainedFaceModel.mat');
 end
@@ -14,11 +13,13 @@ if ~isfile(modelPath)
     error('Model file not found: %s', modelPath);
 end
 
+% Get Data from Training
 data = load(modelPath, 'model');
 if ~isfield(data, 'model') || ~isfield(data.model, 'previewFaces')
     error('Model does not contain previewFaces. Re-run algoTraining.');
 end
 
+% Sync labels and faces
 previewFaces = data.model.previewFaces;
 if isempty(previewFaces)
     error('No preview faces available in model. Re-run algoTraining.');
@@ -30,12 +31,14 @@ else
     previewLabels = repmat("Face", numel(previewFaces), 1);
 end
 
+% Labels and face same length
 if numel(previewLabels) < numel(previewFaces)
     previewLabels(end + 1:numel(previewFaces), 1) = "Face";
 elseif numel(previewLabels) > numel(previewFaces)
     previewLabels = previewLabels(1:numel(previewFaces));
 end
 
+% Get the names accounting for augmentation stuff
 personNames = previewLabels;
 hasAugmentationSuffix = contains(previewLabels, " | ");
 personNames(hasAugmentationSuffix) = extractBefore(previewLabels(hasAugmentationSuffix), " | ");
@@ -45,11 +48,13 @@ if isempty(uniquePeople)
     error('No person labels available in model. Re-run algoTraining.');
 end
 
+% UI to display what page of registered faces is being shown
 fig = figure( ...
     'Name', 'Registered Face Previews', ...
     'NumberTitle', 'off');
 setappdata(fig, 'currentPersonIndex', 1);
 
+% Page Buttons
 uicontrol( ...
     'Style', 'pushbutton', ...
     'String', 'Previous', ...
@@ -64,6 +69,7 @@ uicontrol( ...
 
 renderCurrentPerson();
 
+% Function to render the current person's faces
     function renderCurrentPerson()
         currentPersonIndex = getappdata(fig, 'currentPersonIndex');
         currentPerson = uniquePeople(currentPersonIndex);
@@ -102,6 +108,7 @@ renderCurrentPerson();
             currentPerson, n, numel(personFaces), currentPersonIndex, numel(uniquePeople)));
     end
 
+% Functions for page buttons next/previous
     function showPreviousPerson(~, ~)
         currentPersonIndex = getappdata(fig, 'currentPersonIndex');
         currentPersonIndex = max(1, currentPersonIndex - 1);
